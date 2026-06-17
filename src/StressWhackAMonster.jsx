@@ -1,43 +1,29 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 /**
- * 壓力紓壓打怪遊戲 — 打地鼠版 (prototype v2)
- * 玩法：3x3 九宮格，壓力怪隨機冒出，點擊扣血，打到「投降」階段得 1 分，
- *       怪會自己溜走，30 秒倒數後結算。
+ * 壓力紓壓打怪遊戲 — 打地鼠版 (prototype v3 · UI 升級)
+ * 新增：草地公園背景、地鼠土洞造型、圓潤標題與計分卡片。
  *
  * ───────────────────────────────────────────────────────────
- * ✅ 怎麼接你的真圖（只需做一件事）：
- *    把去背好的透明 PNG 放進專案的  public/monsters/  資料夾，
- *    檔名照下面 MONSTERS 裡寫的路徑命名即可（已用你 zip 原本的命名規則）。
- *    放好後圖會自動顯示；沒放圖時會 fallback 顯示 emoji 佔位，不會壞掉。
+ * ✅ 你要放的圖（兩個地方）：
+ *  1. 背景：public/bg_park.png            ← 那張草地公園插畫
+ *  2. 怪物：public/monsters/xxx.png       ← 18 張去背怪物（命名見下方 MONSTERS）
  *
- *    需要的 18 個檔案（6 隻怪 × 3 階段）：
- *      public/monsters/fire_dog_stage_1.png   (2,3)
- *      public/monsters/clock_monster_stage_1.png (2,3)
- *      public/monsters/bowl_monster_stage_1.png  (2,3)
- *      public/monsters/jellyfish_stage_1.png     (2,3)
- *      public/monsters/eraser_monster_stage_1.png(2,3)
- *      public/monsters/cloud_monster_stage_1.png (2,3)
- *    ※ 修正版(v2)的圖，請用上面這些「不帶 v2」的乾淨檔名存進去。
+ *  背景沒放會 fallback 成漸層草地色，怪物沒放會 fallback 成 emoji，都不會壞。
  * ───────────────────────────────────────────────────────────
- *
- * 架構沿用單怪原型的零件：getStage() 與三階段判斷邏輯完全相同，
- * 只是從「一個 Level 管一隻怪」擴成「一個 Board 管九個 Hole」。
  */
 
-// ── 遊戲參數：手感全部在這裡調 ──────────────────────────────
-const GRID = 9;            // 九宮格
-const GAME_TIME = 30;      // 倒數秒數
-const MONSTER_HP = 24;     // 每隻怪血量
-const HIT_DAMAGE = 8;      // 每次點擊扣血（24/8 = 點 3 下打倒一隻）
-const STAY_MIN = 900;      // 怪停留最短毫秒
-const STAY_MAX = 1800;     // 怪停留最長毫秒
-const SPAWN_MIN = 480;     // 冒出間隔最短毫秒
-const SPAWN_MAX = 900;     // 冒出間隔最長毫秒
-const BASE = "/monsters";  // 圖片資料夾路徑
-// ────────────────────────────────────────────────────────────
+const GRID = 9;
+const GAME_TIME = 30;
+const MONSTER_HP = 24;
+const HIT_DAMAGE = 8;
+const STAY_MIN = 900;
+const STAY_MAX = 1800;
+const SPAWN_MIN = 480;
+const SPAWN_MAX = 900;
+const BASE = "/monsters";
+const BG = "/bg_park.png";
 
-// 六隻壓力怪。sprites 是三階段圖片路徑；fallback 是沒放圖時的 emoji。
 const MONSTERS = [
   { id: "fire_dog", name: "火爆汪",  fallback: ["😤","😵","🥹"],
     sprites: [`${BASE}/fire_dog_stage_1.png`, `${BASE}/fire_dog_stage_2.png`, `${BASE}/fire_dog_stage_3.png`] },
@@ -53,34 +39,32 @@ const MONSTERS = [
     sprites: [`${BASE}/cloud_monster_stage_1.png`, `${BASE}/cloud_monster_stage_2.png`, `${BASE}/cloud_monster_stage_3.png`] },
 ];
 
-// 血量百分比 → 階段索引（0 正常 / 1 崩潰 / 2 投降）。與單怪原型同一套邏輯。
 function stageIndex(hp) {
   const pct = (hp / MONSTER_HP) * 100;
   if (pct > 60) return 0;
   if (pct > 20) return 1;
   return 2;
 }
-
 const rand = (min, max) => min + Math.random() * (max - min);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// 單一格的怪物貼圖：優先顯示真圖，圖載入失敗自動 fallback emoji。
 function HoleSprite({ monster, stage }) {
   const [imgOk, setImgOk] = useState(true);
   if (!monster) return null;
-  const src = monster.sprites[stage];
   if (imgOk) {
     return (
       <img
-        src={src}
+        src={monster.sprites[stage]}
         alt={monster.name}
         onError={() => setImgOk(false)}
         draggable={false}
-        style={{ width: "82%", height: "82%", objectFit: "contain", pointerEvents: "none" }}
+        style={{ width: "78%", height: "78%", objectFit: "contain", pointerEvents: "none",
+          filter: "drop-shadow(0 4px 4px rgba(0,0,0,0.25))" }}
       />
     );
   }
-  return <span style={{ fontSize: 44, lineHeight: 1 }}>{monster.fallback[stage]}</span>;
+  return <span style={{ fontSize: 38, lineHeight: 1,
+    filter: "drop-shadow(0 3px 3px rgba(0,0,0,0.25))" }}>{monster.fallback[stage]}</span>;
 }
 
 export default function App() {
@@ -89,20 +73,24 @@ export default function App() {
   );
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_TIME);
-  const [phase, setPhase] = useState("idle"); // idle | playing | over
-  const [popIdx, setPopIdx] = useState(-1);    // 被點擊正在縮放回饋的格子
+  const [phase, setPhase] = useState("idle");
+  const [popIdx, setPopIdx] = useState(-1);
+  const [bgOk, setBgOk] = useState(true);
 
-  // 用 ref 存計時器與每格的縮回 timer，避免 re-render 影響
   const tickRef = useRef(null);
   const spawnRef = useRef(null);
   const retractRefs = useRef(Array(GRID).fill(null));
   const runningRef = useRef(false);
 
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => setBgOk(true);
+    img.onerror = () => setBgOk(false);
+    img.src = BG;
+  }, []);
+
   const clearHole = useCallback((i) => {
-    if (retractRefs.current[i]) {
-      clearTimeout(retractRefs.current[i]);
-      retractRefs.current[i] = null;
-    }
+    if (retractRefs.current[i]) { clearTimeout(retractRefs.current[i]); retractRefs.current[i] = null; }
     setHoles((hs) => {
       const next = hs.slice();
       next[i] = { active: false, hp: 0, monster: null, defeated: false };
@@ -118,7 +106,6 @@ export default function App() {
         const i = pick(empties);
         const next = hs.slice();
         next[i] = { active: true, hp: MONSTER_HP, monster: pick(MONSTERS), defeated: false };
-        // 安排自動縮回
         const stay = rand(STAY_MIN, STAY_MAX);
         retractRefs.current[i] = setTimeout(() => {
           setHoles((cur) => {
@@ -138,7 +125,6 @@ export default function App() {
   }, []);
 
   const start = useCallback(() => {
-    // 清掉所有殘留 timer
     retractRefs.current.forEach((t) => t && clearTimeout(t));
     retractRefs.current = Array(GRID).fill(null);
     setHoles(Array.from({ length: GRID }, () => ({ active: false, hp: 0, monster: null, defeated: false })));
@@ -148,7 +134,6 @@ export default function App() {
     runningRef.current = true;
   }, []);
 
-  // phase 進入 playing 時啟動倒數與冒出迴圈
   useEffect(() => {
     if (phase !== "playing") return;
     tickRef.current = setInterval(() => {
@@ -165,13 +150,9 @@ export default function App() {
       });
     }, 1000);
     spawn();
-    return () => {
-      clearInterval(tickRef.current);
-      clearTimeout(spawnRef.current);
-    };
+    return () => { clearInterval(tickRef.current); clearTimeout(spawnRef.current); };
   }, [phase, spawn]);
 
-  // 卸載時清乾淨
   useEffect(() => () => {
     clearInterval(tickRef.current);
     clearTimeout(spawnRef.current);
@@ -190,14 +171,12 @@ export default function App() {
         next[i] = { ...h, hp: 0, defeated: true };
         setScore((s) => s + 1);
         if (retractRefs.current[i]) { clearTimeout(retractRefs.current[i]); retractRefs.current[i] = null; }
-        // 投降表情停留一下再縮回
         setTimeout(() => clearHole(i), 380);
       } else {
         next[i] = { ...h, hp: newHp };
       }
       return next;
     });
-    // 點擊縮放回饋
     setPopIdx(i);
     setTimeout(() => setPopIdx((p) => (p === i ? -1 : p)), 90);
   }, [phase, start, clearHole]);
@@ -208,101 +187,137 @@ export default function App() {
     : s >= 4 ? "有打到幾隻，輕鬆一下也好。"
     : "慢慢來，下一局再放鬆發洩。";
 
+  const sceneBg = bgOk
+    ? `url(${BG}) center top / cover no-repeat`
+    : "linear-gradient(#7ec9f5 0%, #9ad9f7 26%, #bfe89a 44%, #cbe84e 58%, #c5e84a 100%)";
+
   return (
     <div style={S.root}>
       <style>{css}</style>
-      <header style={S.header}>
-        <h1 style={S.title}>壓力紓壓打怪</h1>
-        <p style={S.subtitle}>怪會自己溜走，手腳要快</p>
-      </header>
+      <div style={{ ...S.scene, background: sceneBg }}>
 
-      <div style={S.statRow}>
-        <div style={S.stat}>
-          <div style={S.statLabel}>打倒</div>
-          <div style={S.statVal}>{score}</div>
+        <div style={S.titleWrap}>
+          <div style={S.titlePlate}>壓力紓壓打怪</div>
         </div>
-        <div style={S.stat}>
-          <div style={S.statLabel}>剩餘時間</div>
-          <div style={S.statVal}>{timeLeft}</div>
+
+        <div style={S.statRow}>
+          <div style={S.statCard}>
+            <div style={S.statLabel}>打倒</div>
+            <div style={{ ...S.statVal, color: "#C0392B" }}>{score}</div>
+          </div>
+          <div style={S.statCard}>
+            <div style={S.statLabel}>剩餘</div>
+            <div style={{ ...S.statVal, color: "#2E7D32" }}>{timeLeft}</div>
+          </div>
         </div>
+
+        <div style={S.grid}>
+          {holes.map((h, i) => (
+            <button
+              key={i}
+              onClick={() => whack(i)}
+              aria-label={h.active ? `打 ${h.monster?.name}` : `洞口 ${i + 1}`}
+              style={S.cell}
+            >
+              <span style={S.dirt} />
+              {h.active && (
+                <span style={{
+                  ...S.sprite,
+                  transform: popIdx === i ? "translateX(-50%) scale(0.86)" : "translateX(-50%) scale(1)",
+                }}>
+                  <HoleSprite monster={h.monster} stage={stageIndex(h.hp)} />
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <p style={S.hint}>
+          {phase === "idle" ? "點任一格開始" : phase === "playing" ? "快打！" : ""}
+        </p>
+
+        {phase === "over" && (
+          <div style={S.overlayMask}>
+            <div style={S.overlay}>
+              <div style={S.ovEmoji}>🏳️</div>
+              <h2 style={S.ovTitle}>時間到！</h2>
+              <p style={S.ovText}>這局打倒了 {score} 隻壓力怪。{encourage(score)}</p>
+              <button style={S.againBtn} onClick={start}>再來一局</button>
+            </div>
+          </div>
+        )}
       </div>
-
-      <div style={S.grid}>
-        {holes.map((h, i) => (
-          <button
-            key={i}
-            onClick={() => whack(i)}
-            aria-label={h.active ? `打 ${h.monster?.name}` : `洞口 ${i + 1}`}
-            style={{
-              ...S.cell,
-              background: h.active ? "#FFFFFF" : "rgba(255,255,255,0.5)",
-              transform: popIdx === i ? "scale(0.9)" : "scale(1)",
-            }}
-          >
-            {h.active && <HoleSprite monster={h.monster} stage={stageIndex(h.hp)} />}
-          </button>
-        ))}
-      </div>
-
-      <p style={S.hint}>
-        {phase === "idle" ? "點任一格開始" : phase === "playing" ? "快打！" : ""}
-      </p>
-
-      {phase === "over" && (
-        <div style={S.overlay}>
-          <div style={S.ovEmoji}>🏳️</div>
-          <h2 style={S.ovTitle}>時間到！</h2>
-          <p style={S.ovText}>這局打倒了 {score} 隻壓力怪。{encourage(score)}</p>
-          <button style={S.againBtn} onClick={start}>再來一局</button>
-        </div>
-      )}
     </div>
   );
 }
 
 const css = `
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
-}`;
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+`;
 
 const S = {
   root: {
-    minHeight: "100vh", margin: 0, boxSizing: "border-box",
-    display: "flex", flexDirection: "column", alignItems: "center",
-    padding: "28px 16px 40px",
+    minHeight: "100vh", margin: 0, display: "flex", justifyContent: "center",
+    alignItems: "flex-start", background: "#cbe84e",
     fontFamily: "'Segoe UI','PingFang TC','Microsoft JhengHei',system-ui,sans-serif",
-    background: "radial-gradient(circle at 50% 0%, #FFF3E6 0%, #FFE3CC 45%, #FFD2B3 100%)",
-    color: "#5B3A29",
   },
-  header: { textAlign: "center", marginBottom: 16 },
-  title: { fontSize: 28, fontWeight: 800, margin: 0, color: "#C0392B", letterSpacing: 1 },
-  subtitle: { fontSize: 14, margin: "6px 0 0", opacity: 0.75 },
-  statRow: { width: "100%", maxWidth: 420, display: "flex", justifyContent: "space-between", padding: "0 4px", marginBottom: 14 },
-  stat: { textAlign: "center" },
-  statLabel: { fontSize: 12, opacity: 0.7 },
-  statVal: { fontSize: 26, fontWeight: 800, color: "#C0392B" },
+  scene: {
+    position: "relative", width: "100%", maxWidth: 430, minHeight: "100vh",
+    padding: "26px 18px 40px", boxSizing: "border-box",
+    display: "flex", flexDirection: "column", alignItems: "center",
+  },
+  titleWrap: { marginBottom: 16 },
+  titlePlate: {
+    background: "#fff", color: "#C0392B", fontSize: 20, fontWeight: 800,
+    letterSpacing: 1.5, padding: "9px 26px", borderRadius: 999,
+    boxShadow: "0 4px 0 #E3A86B, 0 8px 14px rgba(0,0,0,0.12)",
+  },
+  statRow: { width: "100%", maxWidth: 360, display: "flex", justifyContent: "space-between", marginBottom: 18 },
+  statCard: {
+    background: "rgba(255,255,255,0.9)", borderRadius: 16, padding: "7px 22px", textAlign: "center",
+    boxShadow: "0 3px 0 rgba(180,140,90,0.45)", minWidth: 80,
+  },
+  statLabel: { fontSize: 12, color: "#7a5b3a", fontWeight: 600 },
+  statVal: { fontSize: 24, fontWeight: 800, lineHeight: 1.1 },
   grid: {
-    width: "100%", maxWidth: 420,
-    display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10,
+    width: "100%", maxWidth: 380, display: "grid",
+    gridTemplateColumns: "repeat(3,1fr)", gap: 14,
   },
   cell: {
-    aspectRatio: "1 / 1", borderRadius: 18, border: "none", cursor: "pointer",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    boxShadow: "0 6px 16px rgba(192,57,43,0.12)",
-    transition: "transform 0.08s ease, background 0.15s ease",
-    WebkitTapHighlightColor: "transparent", overflow: "hidden", padding: 0,
+    position: "relative", aspectRatio: "1 / 1", border: "none", background: "transparent",
+    cursor: "pointer", padding: 0, display: "flex", alignItems: "flex-end", justifyContent: "center",
+    WebkitTapHighlightColor: "transparent",
   },
-  hint: { fontSize: 14, opacity: 0.6, marginTop: 16, height: 20 },
+  dirt: {
+    position: "absolute", left: "8%", right: "8%", bottom: "6%", height: "46%",
+    background: "radial-gradient(ellipse at 50% 35%, #6b4a2e 0%, #5a3d25 60%, #4a3020 100%)",
+    borderRadius: "50%",
+    boxShadow: "inset 0 6px 8px rgba(0,0,0,0.45), 0 3px 4px rgba(0,0,0,0.15)",
+  },
+  sprite: {
+    position: "absolute", left: "50%", bottom: "16%", zIndex: 2,
+    width: "84%", height: "84%", display: "flex", alignItems: "center", justifyContent: "center",
+    transition: "transform 0.08s ease", transformOrigin: "bottom center",
+  },
+  hint: {
+    marginTop: 18, fontSize: 14, fontWeight: 600, color: "#4a6b1f",
+    background: "rgba(255,255,255,0.7)", padding: "4px 16px", borderRadius: 999, height: 22,
+    display: "flex", alignItems: "center",
+  },
+  overlayMask: {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+    display: "flex", alignItems: "center", justifyContent: "center", padding: 24, zIndex: 10,
+  },
   overlay: {
-    marginTop: 18, textAlign: "center", padding: "22px 26px",
-    background: "rgba(255,255,255,0.7)", borderRadius: 20, maxWidth: 360,
+    background: "#fff", borderRadius: 24, padding: "26px 28px", textAlign: "center", maxWidth: 320,
+    boxShadow: "0 16px 40px rgba(0,0,0,0.25)",
   },
-  ovEmoji: { fontSize: 56 },
-  ovTitle: { fontSize: 22, fontWeight: 800, margin: "4px 0 0", color: "#C0392B" },
-  ovText: { fontSize: 14, opacity: 0.8, margin: "10px 0 18px" },
+  ovEmoji: { fontSize: 60 },
+  ovTitle: { fontSize: 23, fontWeight: 800, margin: "4px 0 0", color: "#C0392B" },
+  ovText: { fontSize: 14, color: "#6b5a48", margin: "10px 0 20px", lineHeight: 1.6 },
   againBtn: {
-    border: "none", background: "#C0392B", color: "#fff", fontSize: 15, fontWeight: 700,
-    padding: "11px 30px", borderRadius: 999, cursor: "pointer",
-    boxShadow: "0 8px 20px rgba(192,57,43,0.3)",
+    border: "none", background: "#C0392B", color: "#fff", fontSize: 16, fontWeight: 700,
+    padding: "12px 34px", borderRadius: 999, cursor: "pointer",
+    boxShadow: "0 5px 0 #8E2A1E",
   },
 };
