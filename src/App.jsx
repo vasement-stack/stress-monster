@@ -1,16 +1,12 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import WhackGame from "./WhackGame";
 
 /**
- * 主控檔 — 管畫面切換 + 關卡資料
+ * 主控檔 — 畫面切換 + 關卡資料 + 背景音樂
  * 畫面：home(首頁選包) → levels(關卡列表) → game(打地鼠)
  *
- * ───────────────────────────────────────────────────────────
- * 之後要加關卡 / 改玩法，只動下面的 PACKS 設定即可。
- * 每關的 monsters 決定這關出哪些怪。
- * 第一版九關都用 WhackGame(打地鼠)；未來某關要換玩法時，
- * 在該關加一個欄位指定玩法元件，再到 renderGame() 分流即可。
- * ───────────────────────────────────────────────────────────
+ * 圖片：public/  下放 bg_park.png(預設)、bg_work/bg_life/bg_family.png(各包場景)
+ * 音樂：public/audio/menu_bgm.mp3（整個遊戲共用一首，循環）
  */
 
 const BASE = "/monsters";
@@ -29,21 +25,21 @@ const M = {
     sprites: [`${BASE}/cloud_monster_stage_1.png`,`${BASE}/cloud_monster_stage_2.png`,`${BASE}/cloud_monster_stage_3.png`] },
 };
 
-// 三包 × 三關。monsters = 這關會冒出的怪。
+// 三包 × 三關。bg = 這包的遊戲場景背景。monsters = 這關會冒出的怪。
 const PACKS = [
-  { id: "work", name: "職場包", emoji: "💼", color: "#378ADD",
+  { id: "work", name: "職場包", emoji: "💼", color: "#378ADD", bg: "/bg_work.png",
     levels: [
       { id: "ppt",     name: "寫PPT",   monsters: [M.clock, M.eraser] },
       { id: "report",  name: "趕報告",  monsters: [M.clock, M.eraser] },
       { id: "meeting", name: "會議轟炸", monsters: [M.clock, M.fire_dog] },
     ] },
-  { id: "life", name: "生活雜事包", emoji: "🧺", color: "#1D9E75",
+  { id: "life", name: "生活雜事包", emoji: "🧺", color: "#1D9E75", bg: "/bg_life.png",
     levels: [
       { id: "dish",    name: "洗碗",    monsters: [M.bowl, M.cloud] },
       { id: "trash",   name: "倒垃圾",  monsters: [M.bowl, M.cloud] },
       { id: "tidy",    name: "整理房間", monsters: [M.bowl, M.cloud] },
     ] },
-  { id: "family", name: "家庭包", emoji: "🏠", color: "#7F77DD",
+  { id: "family", name: "家庭包", emoji: "🏠", color: "#7F77DD", bg: "/bg_family.png",
     levels: [
       { id: "marry",   name: "被催婚",   monsters: [M.fire_dog, M.jellyfish] },
       { id: "compare", name: "親戚比較", monsters: [M.jellyfish, M.fire_dog] },
@@ -51,18 +47,59 @@ const PACKS = [
     ] },
 ];
 
+const BGM = "/audio/menu_bgm.mp3";
+
 export default function App() {
-  const [screen, setScreen] = useState("home"); // home | levels | game
+  const [screen, setScreen] = useState("home");
   const [packId, setPackId] = useState(null);
   const [level, setLevel] = useState(null);
+  const [muted, setMuted] = useState(false);
+  const audioRef = useRef(null);
 
   const pack = PACKS.find((p) => p.id === packId);
 
-  if (screen === "game" && level) {
+  // 建立背景音樂(只建一次)；手機需使用者互動後才能播，故第一次點擊時嘗試播放
+  useEffect(() => {
+    const a = new Audio(BGM);
+    a.loop = true;
+    a.volume = 0.5;
+    audioRef.current = a;
+    const tryPlay = () => {
+      if (!audioRef.current) return;
+      audioRef.current.play().catch(() => {});
+    };
+    // 任一次互動就嘗試開始播放
+    window.addEventListener("pointerdown", tryPlay, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", tryPlay);
+      a.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  // 靜音切換
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.muted = muted;
+  }, [muted]);
+
+  const MuteButton = () => (
+    <button
+      onClick={() => setMuted((m) => !m)}
+      aria-label={muted ? "開啟音樂" : "關閉音樂"}
+      style={S.muteBtn}
+    >
+      {muted ? "🔇" : "🔊"}
+    </button>
+  );
+
+  if (screen === "game" && level && pack) {
     return (
       <WhackGame
         monsters={level.monsters}
         levelName={level.name}
+        bg={pack.bg}
+        muted={muted}
+        onToggleMute={() => setMuted((m) => !m)}
         onExit={() => setScreen("levels")}
       />
     );
@@ -71,6 +108,8 @@ export default function App() {
   return (
     <div style={S.root}>
       <div style={S.scene}>
+        <MuteButton />
+
         {screen === "home" && (
           <>
             <div style={S.titlePlate}>壓力紓壓打怪</div>
@@ -126,6 +165,9 @@ const S = {
     fontFamily: "'Segoe UI','PingFang TC','Microsoft JhengHei',system-ui,sans-serif" },
   scene: { position: "relative", width: "100%", maxWidth: 430, minHeight: "100vh", padding: "32px 22px 40px",
     boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center" },
+  muteBtn: { position: "absolute", top: 20, right: 18, border: "none", background: "rgba(255,255,255,0.9)",
+    fontSize: 18, width: 40, height: 40, borderRadius: "50%", cursor: "pointer",
+    boxShadow: "0 3px 0 rgba(180,140,90,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 5 },
   titlePlate: { background: "#fff", color: "#C0392B", fontSize: 24, fontWeight: 800, letterSpacing: 1.5,
     padding: "10px 28px", borderRadius: 999, boxShadow: "0 4px 0 #E3A86B, 0 8px 14px rgba(0,0,0,0.12)" },
   sub: { fontSize: 15, color: "#5B3A29", margin: "16px 0 28px", fontWeight: 600,

@@ -1,32 +1,27 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 /**
- * 打地鼠玩法元件 — 可重用
- * 由外部傳入這一關要出的怪物清單(monsters)、關卡名稱(levelName)，
- * 以及結束回呼(onExit 回關卡列表)。
+ * 打地鼠玩法元件 — 可重用（一擊必倒版）
+ * 由外部傳入這一關要出的怪物清單(monsters)、關卡名稱(levelName)、
+ * 結束回呼(onExit 回關卡列表)。
  *
- * 圖片路徑沿用 public/monsters/ 命名，沒放圖會 fallback emoji。
+ * 玩法：怪冒出顯示「正常」表情，點一下直接打倒、切「投降」表情後縮回得 1 分。
+ *       （三階段血量變化保留給之後的慢節奏關卡，打地鼠走快速連打爽感。）
  */
 
 const GRID = 9;
 const GAME_TIME = 30;
-const MONSTER_HP = 24;
-const HIT_DAMAGE = 8;
-const STAY_MIN = 900;
-const STAY_MAX = 1800;
-const SPAWN_MIN = 480;
-const SPAWN_MAX = 900;
-const BG = "/bg_park.png";
+const STAY_MIN = 700;       // 怪停留最短毫秒（比三下版短，連打更順）
+const STAY_MAX = 1400;
+const SPAWN_MIN = 380;      // 冒出間隔最短毫秒（更密）
+const SPAWN_MAX = 720;
+const DEFEAT_HOLD = 280;    // 投降表情停留毫秒後縮回
+const DEFAULT_BG = "/bg_park.png";
 
-function stageIndex(hp) {
-  const pct = (hp / MONSTER_HP) * 100;
-  if (pct > 60) return 0;
-  if (pct > 20) return 1;
-  return 2;
-}
 const rand = (min, max) => min + Math.random() * (max - min);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
+// 怪物貼圖：stage 0 = 正常(剛冒出)、stage 2 = 投降(被打中)
 function HoleSprite({ monster, stage }) {
   const [imgOk, setImgOk] = useState(true);
   if (!monster) return null;
@@ -42,9 +37,10 @@ function HoleSprite({ monster, stage }) {
     filter: "drop-shadow(0 3px 3px rgba(0,0,0,0.25))" }}>{monster.fallback[stage]}</span>;
 }
 
-export default function WhackGame({ monsters, levelName, onExit }) {
+export default function WhackGame({ monsters, levelName, bg, muted, onToggleMute, onExit }) {
+  const BG = bg || DEFAULT_BG;
   const [holes, setHoles] = useState(() =>
-    Array.from({ length: GRID }, () => ({ active: false, hp: 0, monster: null, defeated: false }))
+    Array.from({ length: GRID }, () => ({ active: false, defeated: false, monster: null }))
   );
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_TIME);
@@ -62,13 +58,13 @@ export default function WhackGame({ monsters, levelName, onExit }) {
     img.onload = () => setBgOk(true);
     img.onerror = () => setBgOk(false);
     img.src = BG;
-  }, []);
+  }, [BG]);
 
   const clearHole = useCallback((i) => {
     if (retractRefs.current[i]) { clearTimeout(retractRefs.current[i]); retractRefs.current[i] = null; }
     setHoles((hs) => {
       const next = hs.slice();
-      next[i] = { active: false, hp: 0, monster: null, defeated: false };
+      next[i] = { active: false, defeated: false, monster: null };
       return next;
     });
   }, []);
@@ -80,13 +76,13 @@ export default function WhackGame({ monsters, levelName, onExit }) {
       if (empties.length) {
         const i = pick(empties);
         const next = hs.slice();
-        next[i] = { active: true, hp: MONSTER_HP, monster: pick(monsters), defeated: false };
+        next[i] = { active: true, defeated: false, monster: pick(monsters) };
         const stay = rand(STAY_MIN, STAY_MAX);
         retractRefs.current[i] = setTimeout(() => {
           setHoles((cur) => {
             if (cur[i].active && !cur[i].defeated) {
               const n2 = cur.slice();
-              n2[i] = { active: false, hp: 0, monster: null, defeated: false };
+              n2[i] = { active: false, defeated: false, monster: null };
               return n2;
             }
             return cur;
@@ -102,7 +98,7 @@ export default function WhackGame({ monsters, levelName, onExit }) {
   const start = useCallback(() => {
     retractRefs.current.forEach((t) => t && clearTimeout(t));
     retractRefs.current = Array(GRID).fill(null);
-    setHoles(Array.from({ length: GRID }, () => ({ active: false, hp: 0, monster: null, defeated: false })));
+    setHoles(Array.from({ length: GRID }, () => ({ active: false, defeated: false, monster: null })));
     setScore(0);
     setTimeLeft(GAME_TIME);
     setPhase("playing");
@@ -141,25 +137,20 @@ export default function WhackGame({ monsters, levelName, onExit }) {
       const h = hs[i];
       if (!h.active || h.defeated) return hs;
       const next = hs.slice();
-      const newHp = Math.max(0, h.hp - HIT_DAMAGE);
-      if (newHp <= 0) {
-        next[i] = { ...h, hp: 0, defeated: true };
-        setScore((s) => s + 1);
-        if (retractRefs.current[i]) { clearTimeout(retractRefs.current[i]); retractRefs.current[i] = null; }
-        setTimeout(() => clearHole(i), 380);
-      } else {
-        next[i] = { ...h, hp: newHp };
-      }
+      next[i] = { ...h, defeated: true };   // 一擊即倒：直接標記投降
       return next;
     });
+    setScore((s) => s + 1);
+    if (retractRefs.current[i]) { clearTimeout(retractRefs.current[i]); retractRefs.current[i] = null; }
+    setTimeout(() => clearHole(i), DEFEAT_HOLD);
     setPopIdx(i);
     setTimeout(() => setPopIdx((p) => (p === i ? -1 : p)), 90);
   }, [phase, start, clearHole]);
 
   const encourage = (s) =>
-    s >= 18 ? "壓力被你壓制得死死的，太猛了！"
-    : s >= 10 ? "發洩得不錯，壓力少了一大半。"
-    : s >= 4 ? "有打到幾隻，輕鬆一下也好。"
+    s >= 24 ? "壓力被你壓制得死死的，太猛了！"
+    : s >= 14 ? "發洩得不錯，壓力少了一大半。"
+    : s >= 6 ? "有打到幾隻，輕鬆一下也好。"
     : "慢慢來，下一局再放鬆發洩。";
 
   const sceneBg = bgOk
@@ -174,7 +165,9 @@ export default function WhackGame({ monsters, levelName, onExit }) {
         <div style={S.topBar}>
           <button style={S.backBtn} onClick={onExit} aria-label="返回關卡列表">‹ 關卡</button>
           <div style={S.levelPlate}>{levelName}</div>
-          <div style={{ width: 56 }} />
+          <button style={S.muteBtn} onClick={onToggleMute} aria-label={muted ? "開啟音樂" : "關閉音樂"}>
+            {muted ? "🔇" : "🔊"}
+          </button>
         </div>
 
         <div style={S.statRow}>
@@ -196,7 +189,7 @@ export default function WhackGame({ monsters, levelName, onExit }) {
               {h.active && (
                 <span style={{ ...S.sprite,
                   transform: popIdx === i ? "translateX(-50%) scale(0.86)" : "translateX(-50%) scale(1)" }}>
-                  <HoleSprite monster={h.monster} stage={stageIndex(h.hp)} />
+                  <HoleSprite monster={h.monster} stage={h.defeated ? 2 : 0} />
                 </span>
               )}
             </button>
@@ -204,7 +197,7 @@ export default function WhackGame({ monsters, levelName, onExit }) {
         </div>
 
         <p style={S.hint}>
-          {phase === "idle" ? "點任一格開始" : phase === "playing" ? "快打！" : ""}
+          {phase === "idle" ? "點任一格開始" : phase === "playing" ? "看到怪就點！" : ""}
         </p>
 
         {phase === "over" && (
@@ -235,6 +228,9 @@ const S = {
   topBar: { width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   backBtn: { border: "none", background: "rgba(255,255,255,0.9)", color: "#5B3A29", fontSize: 14, fontWeight: 700,
     padding: "7px 14px", borderRadius: 999, cursor: "pointer", boxShadow: "0 3px 0 rgba(180,140,90,0.4)", width: 56 },
+  muteBtn: { border: "none", background: "rgba(255,255,255,0.9)", fontSize: 16, width: 40, height: 40,
+    borderRadius: "50%", cursor: "pointer", boxShadow: "0 3px 0 rgba(180,140,90,0.4)",
+    display: "flex", alignItems: "center", justifyContent: "center" },
   levelPlate: { background: "#fff", color: "#C0392B", fontSize: 17, fontWeight: 800, letterSpacing: 1,
     padding: "8px 20px", borderRadius: 999, boxShadow: "0 4px 0 #E3A86B, 0 8px 14px rgba(0,0,0,0.12)" },
   statRow: { width: "100%", maxWidth: 360, display: "flex", justifyContent: "space-between", marginBottom: 16 },
