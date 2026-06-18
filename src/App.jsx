@@ -28,18 +28,21 @@ const M = {
 // 三包 × 三關。bg = 這包的遊戲場景背景。monsters = 這關會冒出的怪。
 const PACKS = [
   { id: "work", name: "職場包", emoji: "💼", color: "#378ADD", bg: "/bg_work.png",
+    face: `${BASE}/clock_monster_stage_1.png`, faceFallback: "😖",
     levels: [
       { id: "ppt",     name: "寫PPT",   monsters: [M.clock, M.eraser] },
       { id: "report",  name: "趕報告",  monsters: [M.clock, M.eraser] },
       { id: "meeting", name: "會議轟炸", monsters: [M.clock, M.fire_dog] },
     ] },
   { id: "life", name: "生活雜事包", emoji: "🧺", color: "#1D9E75", bg: "/bg_life.png",
+    face: `${BASE}/bowl_monster_stage_1.png`, faceFallback: "😣",
     levels: [
       { id: "dish",    name: "洗碗",    monsters: [M.bowl, M.cloud] },
       { id: "trash",   name: "倒垃圾",  monsters: [M.bowl, M.cloud] },
       { id: "tidy",    name: "整理房間", monsters: [M.bowl, M.cloud] },
     ] },
   { id: "family", name: "家庭包", emoji: "🏠", color: "#7F77DD", bg: "/bg_family.png",
+    face: `${BASE}/fire_dog_stage_1.png`, faceFallback: "😤",
     levels: [
       { id: "marry",   name: "被催婚",   monsters: [M.fire_dog, M.jellyfish] },
       { id: "compare", name: "親戚比較", monsters: [M.jellyfish, M.fire_dog] },
@@ -48,6 +51,19 @@ const PACKS = [
 ];
 
 const BGM = "/audio/menu_bgm.mp3";
+
+// 怪物頭像：真圖優先，載入失敗 fallback emoji
+function Face({ src, fallback, size }) {
+  const [ok, setOk] = useState(true);
+  if (ok) {
+    return (
+      <img src={src} alt="" onError={() => setOk(false)} draggable={false}
+        style={{ width: size, height: size, objectFit: "contain",
+          filter: "drop-shadow(0 3px 4px rgba(0,0,0,0.2))" }} />
+    );
+  }
+  return <span style={{ fontSize: size * 0.7, lineHeight: 1 }}>{fallback}</span>;
+}
 
 export default function App() {
   const [screen, setScreen] = useState("home");
@@ -128,11 +144,16 @@ export default function App() {
             <p style={S.sub}>選一個今天讓你煩的場景</p>
             <div style={S.packList}>
               {PACKS.map((p) => (
-                <button key={p.id} style={{ ...S.packCard, boxShadow: `0 5px 0 ${shade(p.color)}` }}
+                <button key={p.id} style={{ ...S.packCard, boxShadow: `0 6px 0 ${shade(p.color)}` }}
                   onClick={() => { setPackId(p.id); setScreen("levels"); }}>
-                  <span style={S.packEmoji}>{p.emoji}</span>
-                  <span style={{ ...S.packName, color: p.color }}>{p.name}</span>
-                  <span style={S.packCount}>{p.levels.length} 關</span>
+                  <span style={{ ...S.packFace, background: tint(p.color) }}>
+                    <Face src={p.face} fallback={p.faceFallback} size={56} />
+                  </span>
+                  <span style={S.packText}>
+                    <span style={{ ...S.packName, color: shade(p.color) }}>{p.name}</span>
+                    <span style={S.packCount}>{p.levels.length} 個關卡</span>
+                  </span>
+                  <span style={{ ...S.packArrow, color: p.color }}>›</span>
                 </button>
               ))}
             </div>
@@ -143,16 +164,21 @@ export default function App() {
           <>
             <div style={S.levelTop}>
               <button style={S.backBtn} onClick={() => setScreen("home")} aria-label="返回首頁">‹ 首頁</button>
-              <div style={{ ...S.titlePlate, fontSize: 18, padding: "8px 22px" }}>{pack.emoji} {pack.name}</div>
+              <div style={{ ...S.titlePlate, fontSize: 18, padding: "8px 22px" }}>{pack.name}</div>
               <div style={{ width: 56 }} />
             </div>
             <div style={S.levelList}>
               {pack.levels.map((lv, i) => (
-                <button key={lv.id} style={{ ...S.levelCard, boxShadow: `0 4px 0 ${shade(pack.color)}` }}
+                <button key={lv.id} style={{ ...S.levelCard, boxShadow: `0 5px 0 ${shade(pack.color)}` }}
                   onClick={() => { setLevel(lv); setScreen("game"); }}>
-                  <span style={{ ...S.levelNum, background: pack.color }}>{i + 1}</span>
-                  <span style={S.levelName}>{lv.name}</span>
-                  <span style={S.levelGo}>開打 ›</span>
+                  <span style={{ ...S.levelFace, background: tint(pack.color) }}>
+                    <Face src={lv.monsters[0].sprites[0]} fallback={lv.monsters[0].fallback[0]} size={40} />
+                  </span>
+                  <span style={S.levelText}>
+                    <span style={S.levelStage}>第 {i + 1} 關</span>
+                    <span style={S.levelName}>{lv.name}</span>
+                  </span>
+                  <span style={{ ...S.levelGo, background: pack.color }}>開打</span>
                 </button>
               ))}
             </div>
@@ -169,6 +195,12 @@ function shade(hex) {
   const g = Math.max(0, ((n >> 8) & 255) - 50);
   const b = Math.max(0, (n & 255) - 50);
   return `rgb(${r},${g},${b})`;
+}
+
+function tint(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgba(${r},${g},${b},0.16)`;
 }
 
 const S = {
@@ -190,18 +222,23 @@ const S = {
   startHint: { fontSize: 13, color: "#5B3A29", marginTop: 18, opacity: 0.7 },
   packList: { width: "100%", display: "flex", flexDirection: "column", gap: 16 },
   packCard: { display: "flex", alignItems: "center", gap: 16, background: "#fff", border: "none",
-    borderRadius: 20, padding: "18px 22px", cursor: "pointer", WebkitTapHighlightColor: "transparent" },
-  packEmoji: { fontSize: 38 },
-  packName: { fontSize: 21, fontWeight: 800, flex: 1, textAlign: "left" },
-  packCount: { fontSize: 14, color: "#999", fontWeight: 600 },
+    borderRadius: 22, padding: "16px 18px", cursor: "pointer", WebkitTapHighlightColor: "transparent" },
+  packFace: { width: 72, height: 72, borderRadius: 18, display: "flex", alignItems: "center",
+    justifyContent: "center", flexShrink: 0 },
+  packText: { display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 3 },
+  packName: { fontSize: 21, fontWeight: 800, textAlign: "left" },
+  packCount: { fontSize: 13, color: "#9a8c7a", fontWeight: 600 },
+  packArrow: { fontSize: 28, fontWeight: 800, flexShrink: 0, marginRight: 4 },
   levelTop: { width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 },
   backBtn: { border: "none", background: "rgba(255,255,255,0.9)", color: "#5B3A29", fontSize: 14, fontWeight: 700,
     padding: "7px 14px", borderRadius: 999, cursor: "pointer", boxShadow: "0 3px 0 rgba(180,140,90,0.4)", width: 56 },
   levelList: { width: "100%", display: "flex", flexDirection: "column", gap: 14 },
-  levelCard: { display: "flex", alignItems: "center", gap: 16, background: "#fff", border: "none",
-    borderRadius: 18, padding: "16px 20px", cursor: "pointer", WebkitTapHighlightColor: "transparent" },
-  levelNum: { width: 32, height: 32, borderRadius: "50%", color: "#fff", fontSize: 16, fontWeight: 800,
-    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  levelName: { fontSize: 19, fontWeight: 800, color: "#5B3A29", flex: 1, textAlign: "left" },
-  levelGo: { fontSize: 15, color: "#C0392B", fontWeight: 700 },
+  levelCard: { display: "flex", alignItems: "center", gap: 14, background: "#fff", border: "none",
+    borderRadius: 18, padding: "12px 14px", cursor: "pointer", WebkitTapHighlightColor: "transparent" },
+  levelFace: { width: 54, height: 54, borderRadius: 14, display: "flex", alignItems: "center",
+    justifyContent: "center", flexShrink: 0 },
+  levelText: { display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1, gap: 2 },
+  levelStage: { fontSize: 12, color: "#9a8c7a", fontWeight: 700 },
+  levelName: { fontSize: 19, fontWeight: 800, color: "#5B3A29", textAlign: "left" },
+  levelGo: { fontSize: 14, color: "#fff", fontWeight: 800, padding: "7px 18px", borderRadius: 999, flexShrink: 0 },
 };
