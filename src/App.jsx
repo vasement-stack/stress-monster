@@ -54,28 +54,27 @@ export default function App() {
   const [packId, setPackId] = useState(null);
   const [level, setLevel] = useState(null);
   const [muted, setMuted] = useState(false);
+  const [started, setStarted] = useState(false);
   const audioRef = useRef(null);
 
   const pack = PACKS.find((p) => p.id === packId);
 
-  // 建立背景音樂(只建一次)；手機需使用者互動後才能播，故第一次點擊時嘗試播放
+  // 建立背景音樂物件(只建一次)，實際播放在「開始」按鈕點擊當下觸發
   useEffect(() => {
     const a = new Audio(BGM);
     a.loop = true;
     a.volume = 0.5;
+    a.preload = "auto";
     audioRef.current = a;
-    const tryPlay = () => {
-      if (!audioRef.current) return;
-      audioRef.current.play().catch(() => {});
-    };
-    // 任一次互動就嘗試開始播放
-    window.addEventListener("pointerdown", tryPlay, { once: true });
-    return () => {
-      window.removeEventListener("pointerdown", tryPlay);
-      a.pause();
-      audioRef.current = null;
-    };
+    return () => { a.pause(); audioRef.current = null; };
   }, []);
+
+  // 玩家點「開始」：在使用者手勢當下直接播放，手機瀏覽器才會放行
+  const handleStart = () => {
+    const a = audioRef.current;
+    if (a) { a.play().catch(() => {}); }
+    setStarted(true);
+  };
 
   // 靜音切換
   useEffect(() => {
@@ -91,6 +90,19 @@ export default function App() {
       {muted ? "🔇" : "🔊"}
     </button>
   );
+
+  if (!started) {
+    return (
+      <div style={S.root}>
+        <div style={{ ...S.scene, justifyContent: "center" }}>
+          <div style={S.titlePlate}>壓力紓壓打怪</div>
+          <p style={S.sub}>把煩人的事變成可愛怪物，打爆它紓壓</p>
+          <button style={S.startBtn} onClick={handleStart}>▶ 開始</button>
+          <p style={S.startHint}>點「開始」會播放背景音樂 🎵</p>
+        </div>
+      </div>
+    );
+  }
 
   if (screen === "game" && level && pack) {
     return (
@@ -171,7 +183,11 @@ const S = {
   titlePlate: { background: "#fff", color: "#C0392B", fontSize: 24, fontWeight: 800, letterSpacing: 1.5,
     padding: "10px 28px", borderRadius: 999, boxShadow: "0 4px 0 #E3A86B, 0 8px 14px rgba(0,0,0,0.12)" },
   sub: { fontSize: 15, color: "#5B3A29", margin: "16px 0 28px", fontWeight: 600,
-    background: "rgba(255,255,255,0.6)", padding: "5px 16px", borderRadius: 999 },
+    background: "rgba(255,255,255,0.6)", padding: "5px 16px", borderRadius: 999, textAlign: "center" },
+  startBtn: { border: "none", background: "#C0392B", color: "#fff", fontSize: 22, fontWeight: 800,
+    padding: "16px 56px", borderRadius: 999, cursor: "pointer", boxShadow: "0 6px 0 #8E2A1E",
+    letterSpacing: 2, marginTop: 8 },
+  startHint: { fontSize: 13, color: "#5B3A29", marginTop: 18, opacity: 0.7 },
   packList: { width: "100%", display: "flex", flexDirection: "column", gap: 16 },
   packCard: { display: "flex", alignItems: "center", gap: 16, background: "#fff", border: "none",
     borderRadius: 20, padding: "18px 22px", cursor: "pointer", WebkitTapHighlightColor: "transparent" },
