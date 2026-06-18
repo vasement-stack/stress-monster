@@ -1,70 +1,75 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 /**
- * 打地鼠玩法元件 — 可重用（一擊必倒版）
- * 由外部傳入這一關要出的怪物清單(monsters)、關卡名稱(levelName)、
- * 結束回呼(onExit 回關卡列表)。
+ * 玩法 C — 干擾型辨認 (FocusGame)
+ * 九宮格裡同時冒出「真的壓力怪」和「干擾物(無害小圖案)」，
+ * 玩家只點真的怪、別點干擾物。點對得分，點到干擾物短暫卡住(懲罰)。
+ * 對應「焦慮型」：資訊混亂、怕判斷錯，考驗在混亂中精準辨認。
  *
- * 玩法：怪冒出顯示「正常」表情，點一下直接打倒、切「投降」表情後縮回得 1 分。
- *       （三階段血量變化保留給之後的慢節奏關卡，打地鼠走快速連打爽感。）
+ * props：monsters(這關的真怪清單)、levelName、bg、muted、onToggleMute、onExit
  */
 
 const GRID = 9;
 const GAME_TIME = 30;
-const STAY_MIN = 700;       // 怪停留最短毫秒（比三下版短，連打更順）
-const STAY_MAX = 1400;
-const SPAWN_MIN = 380;      // 冒出間隔最短毫秒（更密）
-const SPAWN_MAX = 720;
-const DEFEAT_HOLD = 280;    // 投降表情停留毫秒後縮回
-const DEFAULT_BG = "/bg_park.png";
+const STAY_MIN = 800;
+const STAY_MAX = 1500;
+const SPAWN_MIN = 360;
+const SPAWN_MAX = 700;
+const PENALTY_MS = 600;     // 點到干擾物卡住毫秒
+const DECOY_RATE = 0.5;     // 冒出時有多少機率是干擾物
+const BG = "/bg_park.png";
+
+// 干擾物：無害小圖案(emoji)，跟有描邊的怪物視覺上不同類
+const DECOYS = ["🫧", "🍃", "✨", "💭", "🪶", "☁️"];
 
 const rand = (min, max) => min + Math.random() * (max - min);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// 怪物貼圖：stage 0 = 正常(剛冒出)、stage 2 = 投降(被打中)
-function HoleSprite({ monster, stage }) {
+function MonsterImg({ monster }) {
   const [imgOk, setImgOk] = useState(true);
-  if (!monster) return null;
   if (imgOk) {
     return (
-      <img src={monster.sprites[stage]} alt={monster.name}
+      <img src={monster.sprites[0]} alt={monster.name}
         onError={() => setImgOk(false)} draggable={false}
         style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none",
           filter: "drop-shadow(0 4px 5px rgba(0,0,0,0.28))" }} />
     );
   }
-  return <span style={{ fontSize: 54, lineHeight: 1,
-    filter: "drop-shadow(0 3px 4px rgba(0,0,0,0.28))" }}>{monster.fallback[stage]}</span>;
+  return <span style={{ fontSize: 50, lineHeight: 1 }}>{monster.fallback[0]}</span>;
 }
 
-export default function WhackGame({ monsters, levelName, bg, muted, onToggleMute, onExit }) {
-  const BG = bg || DEFAULT_BG;
+export default function FocusGame({ monsters, levelName, bg, muted, onToggleMute, onExit }) {
+  const theBg = bg || BG;
+  // 每格：{ active, kind: 'monster'|'decoy', monster, decoy }
   const [holes, setHoles] = useState(() =>
-    Array.from({ length: GRID }, () => ({ active: false, defeated: false, monster: null }))
+    Array.from({ length: GRID }, () => ({ active: false, kind: null, monster: null, decoy: null }))
   );
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GAME_TIME);
   const [phase, setPhase] = useState("idle");
   const [popIdx, setPopIdx] = useState(-1);
+  const [wrongIdx, setWrongIdx] = useState(-1);   // 點錯的格子(紅閃)
+  const [penalty, setPenalty] = useState(false);  // 卡住中
   const [bgOk, setBgOk] = useState(true);
 
   const tickRef = useRef(null);
   const spawnRef = useRef(null);
   const retractRefs = useRef(Array(GRID).fill(null));
+  const penaltyRef = useRef(null);
   const runningRef = useRef(false);
 
   useEffect(() => {
     const img = new Image();
     img.onload = () => setBgOk(true);
     img.onerror = () => setBgOk(false);
-    img.src = BG;
-  }, [BG]);
+    img.src = theBg;
+  }, [theBg]);
 
   const clearHole = useCallback((i) => {
     if (retractRefs.current[i]) { clearTimeout(retractRefs.current[i]); retractRefs.current[i] = null; }
     setHoles((hs) => {
       const next = hs.slice();
-      next[i] = { active: false, defeated: false, monster: null };
+      next[i] = { active: false, kind: null, monster: null, decoy: null };
       return next;
     });
   }, []);
@@ -76,13 +81,16 @@ export default function WhackGame({ monsters, levelName, bg, muted, onToggleMute
       if (empties.length) {
         const i = pick(empties);
         const next = hs.slice();
-        next[i] = { active: true, defeated: false, monster: pick(monsters) };
+        const isDecoy = Math.random() < DECOY_RATE;
+        next[i] = isDecoy
+          ? { active: true, kind: "decoy", monster: null, decoy: pick(DECOYS) }
+          : { active: true, kind: "monster", monster: pick(monsters), decoy: null };
         const stay = rand(STAY_MIN, STAY_MAX);
         retractRefs.current[i] = setTimeout(() => {
           setHoles((cur) => {
-            if (cur[i].active && !cur[i].defeated) {
+            if (cur[i].active) {
               const n2 = cur.slice();
-              n2[i] = { active: false, defeated: false, monster: null };
+              n2[i] = { active: false, kind: null, monster: null, decoy: null };
               return n2;
             }
             return cur;
@@ -98,9 +106,11 @@ export default function WhackGame({ monsters, levelName, bg, muted, onToggleMute
   const start = useCallback(() => {
     retractRefs.current.forEach((t) => t && clearTimeout(t));
     retractRefs.current = Array(GRID).fill(null);
-    setHoles(Array.from({ length: GRID }, () => ({ active: false, defeated: false, monster: null })));
+    clearTimeout(penaltyRef.current);
+    setHoles(Array.from({ length: GRID }, () => ({ active: false, kind: null, monster: null, decoy: null })));
     setScore(0);
     setTimeLeft(GAME_TIME);
+    setPenalty(false);
     setPhase("playing");
     runningRef.current = true;
   }, []);
@@ -127,34 +137,38 @@ export default function WhackGame({ monsters, levelName, bg, muted, onToggleMute
   useEffect(() => () => {
     clearInterval(tickRef.current);
     clearTimeout(spawnRef.current);
+    clearTimeout(penaltyRef.current);
     retractRefs.current.forEach((t) => t && clearTimeout(t));
   }, []);
 
-  const whack = useCallback((i) => {
+  const tap = useCallback((i) => {
     if (phase === "idle") { start(); return; }
-    if (phase !== "playing") return;
-    setHoles((hs) => {
-      const h = hs[i];
-      if (!h.active || h.defeated) return hs;
-      const next = hs.slice();
-      next[i] = { ...h, defeated: true };   // 一擊即倒：直接標記投降
-      return next;
-    });
-    setScore((s) => s + 1);
-    if (retractRefs.current[i]) { clearTimeout(retractRefs.current[i]); retractRefs.current[i] = null; }
-    setTimeout(() => clearHole(i), DEFEAT_HOLD);
-    setPopIdx(i);
-    setTimeout(() => setPopIdx((p) => (p === i ? -1 : p)), 90);
-  }, [phase, start, clearHole]);
+    if (phase !== "playing" || penalty) return;
+    const h = holes[i];
+    if (!h.active) return;
+
+    if (h.kind === "monster") {
+      setScore((s) => s + 1);
+      clearHole(i);
+      setPopIdx(i);
+      setTimeout(() => setPopIdx((p) => (p === i ? -1 : p)), 90);
+    } else {
+      // 點到干擾物：紅閃 + 短暫卡住
+      setWrongIdx(i);
+      setTimeout(() => setWrongIdx((w) => (w === i ? -1 : w)), 300);
+      setPenalty(true);
+      clearTimeout(penaltyRef.current);
+      penaltyRef.current = setTimeout(() => setPenalty(false), PENALTY_MS);
+    }
+  }, [phase, penalty, holes, start, clearHole]);
 
   const encourage = (s) =>
-    s >= 24 ? "壓力被你壓制得死死的，太猛了！"
-    : s >= 14 ? "發洩得不錯，壓力少了一大半。"
-    : s >= 6 ? "有打到幾隻，輕鬆一下也好。"
-    : "慢慢來，下一局再放鬆發洩。";
+    s >= 20 ? "在混亂中超精準，焦慮被你看破手腳！"
+    : s >= 12 ? "辨認得不錯，沒被干擾物騙到。"
+    : s >= 5 ? "有抓到幾隻，慢慢就能分清楚。"
+    : "別急，看清楚再點，下一局會更穩。";
 
-  const sceneBg = bgOk
-    ? `url(${BG}) center top / cover no-repeat`
+  const sceneBg = bgOk ? `url(${theBg}) center top / cover no-repeat`
     : "linear-gradient(#7ec9f5 0%, #9ad9f7 26%, #bfe89a 44%, #cbe84e 58%, #c5e84a 100%)";
 
   return (
@@ -181,15 +195,21 @@ export default function WhackGame({ monsters, levelName, bg, muted, onToggleMute
           </div>
         </div>
 
-        <div style={S.grid}>
+        <p style={S.tip}>只點「壓力怪」，別點到飄浮的小東西！</p>
+
+        <div style={{ ...S.grid, opacity: penalty ? 0.55 : 1 }}>
           {holes.map((h, i) => (
-            <button key={i} onClick={() => whack(i)}
-              aria-label={h.active ? `打 ${h.monster?.name}` : `洞口 ${i + 1}`} style={S.cell}>
+            <button key={i} onClick={() => tap(i)} style={{
+              ...S.cell,
+              background: wrongIdx === i ? "rgba(192,57,43,0.25)" : "transparent",
+            }} aria-label={h.active ? (h.kind === "monster" ? "壓力怪" : "干擾物") : `洞口 ${i + 1}`}>
               <span style={S.dirt} />
               {h.active && (
                 <span style={{ ...S.sprite,
                   transform: popIdx === i ? "translateX(-50%) scale(0.86)" : "translateX(-50%) scale(1)" }}>
-                  <HoleSprite monster={h.monster} stage={h.defeated ? 2 : 0} />
+                  {h.kind === "monster"
+                    ? <MonsterImg monster={h.monster} />
+                    : <span style={S.decoy}>{h.decoy}</span>}
                 </span>
               )}
             </button>
@@ -197,7 +217,7 @@ export default function WhackGame({ monsters, levelName, bg, muted, onToggleMute
         </div>
 
         <p style={S.hint}>
-          {phase === "idle" ? "點任一格開始" : phase === "playing" ? "看到怪就點！" : ""}
+          {phase === "idle" ? "點任一格開始" : phase === "playing" ? (penalty ? "點錯了！稍等…" : "看清楚再點！") : ""}
         </p>
 
         {phase === "over" && (
@@ -228,25 +248,30 @@ const S = {
   topBar: { width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   backBtn: { border: "none", background: "rgba(255,255,255,0.9)", color: "#5B3A29", fontSize: 14, fontWeight: 700,
     padding: "7px 14px", borderRadius: 999, cursor: "pointer", boxShadow: "0 3px 0 rgba(180,140,90,0.4)", width: 56 },
+  levelPlate: { background: "#fff", color: "#C0392B", fontSize: 17, fontWeight: 800, letterSpacing: 1,
+    padding: "8px 20px", borderRadius: 999, boxShadow: "0 4px 0 #E3A86B, 0 8px 14px rgba(0,0,0,0.12)" },
   muteBtn: { border: "none", background: "rgba(255,255,255,0.9)", fontSize: 16, width: 40, height: 40,
     borderRadius: "50%", cursor: "pointer", boxShadow: "0 3px 0 rgba(180,140,90,0.4)",
     display: "flex", alignItems: "center", justifyContent: "center" },
-  levelPlate: { background: "#fff", color: "#C0392B", fontSize: 17, fontWeight: 800, letterSpacing: 1,
-    padding: "8px 20px", borderRadius: 999, boxShadow: "0 4px 0 #E3A86B, 0 8px 14px rgba(0,0,0,0.12)" },
-  statRow: { width: "100%", maxWidth: 360, display: "flex", justifyContent: "space-between", marginBottom: 16 },
+  statRow: { width: "100%", maxWidth: 360, display: "flex", justifyContent: "space-between", marginBottom: 10 },
   statCard: { background: "rgba(255,255,255,0.9)", borderRadius: 16, padding: "7px 22px", textAlign: "center",
     boxShadow: "0 3px 0 rgba(180,140,90,0.45)", minWidth: 80 },
   statLabel: { fontSize: 12, color: "#7a5b3a", fontWeight: 600 },
   statVal: { fontSize: 24, fontWeight: 800, lineHeight: 1.1 },
-  grid: { width: "100%", maxWidth: 380, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18 },
-  cell: { position: "relative", aspectRatio: "1 / 1", border: "none", background: "transparent", cursor: "pointer",
-    padding: 0, display: "flex", alignItems: "flex-end", justifyContent: "center", WebkitTapHighlightColor: "transparent" },
+  tip: { fontSize: 13, fontWeight: 600, color: "#5B3A29", background: "rgba(255,255,255,0.75)",
+    padding: "5px 16px", borderRadius: 999, marginBottom: 14, textAlign: "center" },
+  grid: { width: "100%", maxWidth: 380, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 18,
+    transition: "opacity 0.15s ease" },
+  cell: { position: "relative", aspectRatio: "1 / 1", border: "none", cursor: "pointer", borderRadius: 16,
+    padding: 0, display: "flex", alignItems: "flex-end", justifyContent: "center",
+    WebkitTapHighlightColor: "transparent", transition: "background 0.15s ease" },
   dirt: { position: "absolute", left: "8%", right: "8%", bottom: "6%", height: "46%",
     background: "radial-gradient(ellipse at 50% 35%, #6b4a2e 0%, #5a3d25 60%, #4a3020 100%)", borderRadius: "50%",
     boxShadow: "inset 0 6px 8px rgba(0,0,0,0.45), 0 3px 4px rgba(0,0,0,0.15)" },
   sprite: { position: "absolute", left: "50%", bottom: "22%", zIndex: 2, width: "112%", height: "112%",
     display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.08s ease", transformOrigin: "bottom center" },
-  hint: { marginTop: 18, fontSize: 14, fontWeight: 600, color: "#4a6b1f", background: "rgba(255,255,255,0.7)",
+  decoy: { fontSize: 46, lineHeight: 1, opacity: 0.92 },
+  hint: { marginTop: 16, fontSize: 14, fontWeight: 600, color: "#4a6b1f", background: "rgba(255,255,255,0.7)",
     padding: "4px 16px", borderRadius: 999, height: 22, display: "flex", alignItems: "center" },
   overlayMask: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex",
     alignItems: "center", justifyContent: "center", padding: 24, zIndex: 10 },

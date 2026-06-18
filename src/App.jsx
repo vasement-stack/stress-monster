@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import WhackGame from "./WhackGame";
+import RushGame from "./RushGame";
+import FocusGame from "./FocusGame";
 
 /**
  * 主控檔 — 畫面切換 + 關卡資料 + 背景音樂
@@ -30,23 +32,23 @@ const PACKS = [
   { id: "work", name: "職場包", emoji: "💼", color: "#378ADD", bg: "/bg_work.png",
     face: `${BASE}/clock_monster_stage_1.png`, faceFallback: "😖",
     levels: [
-      { id: "ppt",     name: "寫PPT",   monsters: [M.clock, M.eraser] },
-      { id: "report",  name: "趕報告",  monsters: [M.clock, M.eraser] },
-      { id: "meeting", name: "會議轟炸", monsters: [M.clock, M.fire_dog] },
+      { id: "ppt",     name: "寫PPT",   mode: "rush",  monsters: [M.clock, M.eraser] },
+      { id: "report",  name: "趕報告",  mode: "rush",  monsters: [M.clock, M.eraser] },
+      { id: "meeting", name: "會議轟炸", mode: "whack", monsters: [M.clock, M.fire_dog] },
     ] },
   { id: "life", name: "生活雜事包", emoji: "🧺", color: "#1D9E75", bg: "/bg_life.png",
     face: `${BASE}/bowl_monster_stage_1.png`, faceFallback: "😣",
     levels: [
-      { id: "dish",    name: "洗碗",    monsters: [M.bowl, M.cloud] },
-      { id: "trash",   name: "倒垃圾",  monsters: [M.bowl, M.cloud] },
-      { id: "tidy",    name: "整理房間", monsters: [M.bowl, M.cloud] },
+      { id: "dish",    name: "洗碗",    mode: "whack", monsters: [M.bowl, M.cloud] },
+      { id: "trash",   name: "倒垃圾",  mode: "whack", monsters: [M.bowl, M.cloud] },
+      { id: "tidy",    name: "整理房間", mode: "focus", monsters: [M.bowl, M.cloud] },
     ] },
   { id: "family", name: "家庭包", emoji: "🏠", color: "#7F77DD", bg: "/bg_family.png",
     face: `${BASE}/fire_dog_stage_1.png`, faceFallback: "😤",
     levels: [
-      { id: "marry",   name: "被催婚",   monsters: [M.fire_dog, M.jellyfish] },
-      { id: "compare", name: "親戚比較", monsters: [M.jellyfish, M.fire_dog] },
-      { id: "chore",   name: "家務衝突", monsters: [M.fire_dog, M.bowl] },
+      { id: "marry",   name: "被催婚",   mode: "focus", monsters: [M.fire_dog, M.jellyfish] },
+      { id: "compare", name: "親戚比較", mode: "focus", monsters: [M.jellyfish, M.fire_dog] },
+      { id: "chore",   name: "家務衝突", mode: "whack", monsters: [M.fire_dog, M.bowl] },
     ] },
 ];
 
@@ -121,16 +123,20 @@ export default function App() {
   }
 
   if (screen === "game" && level && pack) {
-    return (
-      <WhackGame
-        monsters={level.monsters}
-        levelName={level.name}
-        bg={pack.bg}
-        muted={muted}
-        onToggleMute={() => setMuted((m) => !m)}
-        onExit={() => setScreen("levels")}
-      />
-    );
+    const common = {
+      levelName: level.name,
+      bg: pack.bg,
+      muted: muted,
+      onToggleMute: () => setMuted((m) => !m),
+      onExit: () => setScreen("levels"),
+    };
+    if (level.mode === "rush") {
+      return <RushGame monster={level.monsters[0]} {...common} />;
+    }
+    if (level.mode === "focus") {
+      return <FocusGame monsters={level.monsters} {...common} />;
+    }
+    return <WhackGame monsters={level.monsters} {...common} />;
   }
 
   return (
@@ -205,7 +211,7 @@ function tint(hex) {
 
 const S = {
   root: { minHeight: "100vh", margin: 0, display: "flex", justifyContent: "center", alignItems: "flex-start",
-    background: "linear-gradient(#7ec9f5 0%, #9ad9f7 30%, #bfe89a 55%, #cbe84e 100%)",
+    background: "url(/bg_park.png) center top / cover no-repeat, linear-gradient(#7ec9f5 0%, #9ad9f7 30%, #bfe89a 55%, #cbe84e 100%)",
     fontFamily: "'Segoe UI','PingFang TC','Microsoft JhengHei',system-ui,sans-serif" },
   scene: { position: "relative", width: "100%", maxWidth: 430, minHeight: "100vh", padding: "32px 22px 40px",
     boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center" },
